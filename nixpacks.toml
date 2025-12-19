@@ -1,2 +1,2 @@
 [phases.setup]
-nixPkgs = ["nodePackages.nodejs", "yt-dlp", "ffmpeg"]
+nixPkgs = ["yt-dlp", "ffmpeg"]
