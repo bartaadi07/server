@@ -1,67 +1,64 @@
 const express = require('express');
+const { execFile } = require('child_process');
+const path = require('path');
+const os = require('os');
 const cors = require('cors');
-const axios = require('axios');
 
 const app = express();
+// Railway-en a PORT környezeti változó kötelező
 const port = process.env.PORT || 5500;
 
 app.use(cors());
 
-const cache = {};
-const CACHE_TIME = 30 * 60 * 1000; 
+// A yt-dlp elérési útja
+// Linuxon (Railway) csak 'yt-dlp', Windows-on a helyi .exe
+const ytDlpPath = os.platform() === 'win32' 
+    ? path.join(__dirname, 'yt-dlp.exe') 
+    : 'yt-dlp';
 
-app.get('/api/videa-extractor', async (req, res) => {
+const cache = {};
+const CACHE_TIME = 30 * 60 * 1000;
+
+app.get('/api/videa-extractor', (req, res) => {
     const videoId = req.query.id;
     if (!videoId) return res.status(400).json({ error: 'Nincs ID' });
 
-    if (cache[videoId] && Date.now() - cache[videoId].timestamp < CACHE_TIME) {
-        return res.json({ url: cache[videoId].url });
+    const cached = cache[videoId];
+    if (cached && Date.now() - cached.timestamp < CACHE_TIME) {
+        return res.json({ url: cached.url });
     }
 
-    try {
-        // Lekérjük a lejátszó oldalt
-        const response = await axios.get(`https://videa.hu/player?v=${videoId}`, {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Referer': 'https://videa.hu/'
-            },
-            timeout: 15000
-        });
+    const videoUrl = `https://videa.hu/player?v=${videoId}`;
+    
+    // EREDETI ARGUMENTUMOK + extra stabilitás Railway-re
+    const args = [
+        videoUrl, 
+        '-f', 'best', 
+        '-g', 
+        '--no-warnings', 
+        '--quiet',
+        '--no-playlist'
+    ];
 
-        const html = response.data;
-        let directUrl = null;
-
-        // 1. Módszer: Keresés a forrás listában (JSON formátum)
-        const sourceMatch = html.match(/["']?source["']?\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
-        if (sourceMatch) directUrl = sourceMatch[1];
-
-        // 2. Módszer: Ha az első nem sikerült, keressük a '_v_s_sources' listát
-        if (!directUrl) {
-            const multiMatch = html.match(/src\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/gi);
-            if (multiMatch) {
-                // Kivesszük az utolsót (általában ez a legjobb minőség)
-                const lastSrc = multiMatch[multiMatch.length - 1];
-                const cleanMatch = lastSrc.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
-                if (cleanMatch) directUrl = cleanMatch[1];
-            }
+    // Railway-en a memória szűkös, adjunk neki egy kis időt
+    execFile(ytDlpPath, args, { timeout: 30000 }, (error, stdout, stderr) => {
+        if (error) {
+            console.error('Hiba:', error.message);
+            // Ha nem találja a fájlt (ENOENT), az rendszerhiba
+            return res.status(500).json({ error: 'Kinyerési hiba a szerveren' });
         }
 
-        if (directUrl) {
-            // Karakterkódolások tisztítása
-            directUrl = directUrl.replace(/&amp;/g, '&').replace(/\\/g, '');
-            
-            cache[videoId] = { url: directUrl, timestamp: Date.now() };
-            console.log(`Siker! Link kinyerve: ${videoId}`);
-            return res.json({ url: directUrl });
+        const url = stdout.trim();
+        if (url && url.startsWith('http')) {
+            cache[videoId] = { url, timestamp: Date.now() };
+            res.json({ url });
         } else {
-            console.error("Nem sikerült kinyerni a forrást a HTML-ből.");
-            return res.status(404).json({ error: 'A videó forrása jelenleg nem elérhető.' });
+            console.error('Nincs URL a kimenetben');
+            res.status(404).json({ error: 'Nincs stream' });
         }
-    } catch (error) {
-        console.error('Lekérési hiba:', error.message);
-        res.status(500).json({ error: 'A hálózati kapcsolat megszakadt.' });
-    }
+    });
 });
 
-app.get('/', (req, res) => res.send('API Aktív'));
-app.listen(port, () => console.log(`Szerver kész: ${port}`));
+app.listen(port, () => {
+    console.log(`🚀 Szerver aktív! Port: ${port} | Mód: ${os.platform()}`);
+});
