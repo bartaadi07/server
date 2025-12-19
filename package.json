@@ -1,0 +1,17 @@
+{
+  "name": "vids-extractor-server",
+  "version": "1.0.0",
+  "description": "Videa extractor server for Railway",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
