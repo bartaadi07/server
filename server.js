@@ -7,7 +7,6 @@ const port = process.env.PORT || 5500;
 
 app.use(cors());
 
-// Cache objektum a terhelés csökkentésére
 const cache = {};
 const CACHE_TIME = 30 * 60 * 1000; 
 
@@ -20,39 +19,47 @@ app.get('/api/videa-extractor', async (req, res) => {
     }
 
     try {
-        // Trükk: Olyan fejlécet küldünk, mintha egy sima böngésző lenne
+        console.log(`Próbálkozás a kinyeréssel: ${videoId}`);
+        
+        // 1. Kérés: Info oldal lekérése böngészőnek álcázva
         const response = await axios.get(`https://videa.hu/videainfo/${videoId}`, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://videa.hu/'
-            }
+                'Accept': '*/*'
+            },
+            timeout: 10000
         });
 
-        // Kinyerjük az összes .mp4 linket a válaszból
         const data = response.data;
-        const matches = data.match(/https:\/\/[^?| ]+\.mp4[^ |?|&]*/g);
+        
+        // Finomított keresés: MP4 linkek keresése többféle formátumban
+        // Megnézzük a sima linkeket és a kódolt linkeket is
+        const matches = data.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/g);
 
         if (matches && matches.length > 0) {
-            // Megkeressük a legmagasabb minőséget (általában a lista vége felé van)
-            let directUrl = matches[matches.length - 1];
+            // Megkeressük a leghosszabb URL-t (általában ez tartalmazza a legtöbb paramétert/legjobb minőséget)
+            let directUrl = matches.sort((a, b) => b.length - a.length)[0];
             
-            // Tisztítjuk az URL-t a biztonság kedvéért
-            directUrl = directUrl.split('?')[0]; 
+            // HTML entitások tisztítása (pl. &amp; -> &)
+            directUrl = directUrl.replace(/&amp;/g, '&').replace(/\\/g, '');
+            
+            // Ha a link végén idézőjel vagy egyéb maradt, levágjuk
+            directUrl = directUrl.split('"')[0].split("'")[0];
 
             cache[videoId] = { url: directUrl, timestamp: Date.now() };
-            console.log(`Siker! Videó kinyerve: ${videoId}`);
+            console.log(`Siker! Link kinyerve.`);
             
-            res.json({ url: directUrl });
+            return res.json({ url: directUrl });
         } else {
-            console.error("Válasz érkezett, de nincs benne mp4 link.");
-            res.status(404).json({ error: 'Nem található videó fájl.' });
+            console.error("Nem található MP4 minta a válaszban.");
+            return res.status(404).json({ error: 'A videó forrása nem azonosítható.' });
         }
     } catch (error) {
-        console.error('Lekérési hiba:', error.message);
-        res.status(500).json({ error: 'A Videa nem válaszolt a kérésre.' });
+        console.error('Szerver hiba:', error.message);
+        res.status(500).json({ error: 'A szerver nem tudta elérni a videó tárolót.' });
     }
 });
 
-app.get('/', (req, res) => res.send('API üzemkész!'));
+app.get('/', (req, res) => res.send('API Aktív'));
 
-app.listen(port, () => console.log(`Szerver elindult a ${port} porton.`));
+app.listen(port, () => console.log(`Szerver elindítva a ${port} porton.`));
