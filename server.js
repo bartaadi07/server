@@ -19,50 +19,44 @@ app.get('/api/videa-extractor', async (req, res) => {
     }
 
     try {
-        console.log(`Lekérés: ${videoId}`);
+        console.log(`Lekérés indítása: ${videoId}`);
         
-        // Olyan fejlécek, amikkel a szerver egy valódi Chrome böngészőnek tűnik
-        const axiosConfig = {
+        // 1. Lépés: Lekérjük a videó főoldalát, hogy megkapjuk a szükséges sütiket/fejléceket
+        const response = await axios.get(`https://videa.hu/videainfo/${videoId}`, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'https://videa.hu/'
+                'Referer': 'https://videa.hu/',
+                'Accept-Language': 'hu-HU,hu;q=0.9,en-US;q=0.8,en;q=0.7'
             },
             timeout: 10000
-        };
+        });
 
-        // 1. PRÓBÁLKOZÁS: A videainfo oldal (gyorsabb)
-        let response = await axios.get(`https://videa.hu/videainfo/${videoId}`, axiosConfig);
-        let data = response.data;
-        let matches = data.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/g);
+        const data = response.data;
 
-        // 2. PRÓBÁLKOZÁS: Ha az első nem sikerült, lekérjük a teljes lejátszó oldalt
-        if (!matches || matches.length === 0) {
-            console.log("1. módszer sikertelen, váltás a 2. módszerre...");
-            response = await axios.get(`https://videa.hu/player?v=${videoId}`, axiosConfig);
-            data = response.data;
-            matches = data.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/g);
-        }
+        // Finomított keresés az MP4 linkekre
+        const matches = data.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/g);
 
         if (matches && matches.length > 0) {
-            // A leghosszabb URL tartalmazza a legtöbb biztonsági kulcsot
+            // A leghosszabb URL általában a legjobb minőség
             let directUrl = matches.sort((a, b) => b.length - a.length)[0];
             
-            // Karakterek tisztítása
+            // HTML entitások tisztítása
             directUrl = directUrl.replace(/&amp;/g, '&').replace(/\\/g, '');
 
             cache[videoId] = { url: directUrl, timestamp: Date.now() };
-            console.log(`Sikeres kinyerés: ${videoId}`);
+            console.log(`Siker! Videó kinyerve.`);
             
             return res.json({ url: directUrl });
         } else {
-            throw new Error("Nem található videó link a válaszban.");
+            console.log("A válasz nem tartalmazott mp4 linket. A Videa valószínűleg blokkolta a szervert.");
+            return res.status(500).json({ error: 'A Videa blokkolja a szerver IP-címét.' });
         }
     } catch (error) {
-        console.error('Hiba részletei:', error.message);
-        res.status(500).json({ error: 'A Videa jelenleg korlátozza a hozzáférést a szerverről.' });
+        console.error('Lekérési hiba:', error.message);
+        res.status(500).json({ error: 'Hálózati hiba a Videa elérésekor.' });
     }
 });
 
 app.get('/', (req, res) => res.send('API OK'));
 
-app.listen(port, () => console.log(`🚀 Szerver fut a ${port} porton!`));
+app.listen(port, () => console.log(`🚀 Szerver elindult a ${port} porton.`));
