@@ -19,45 +19,49 @@ app.get('/api/videa-extractor', async (req, res) => {
     }
 
     try {
-        // Közvetlenül a lejátszó oldalt kérjük le
+        // Lekérjük a lejátszó oldalt
         const response = await axios.get(`https://videa.hu/player?v=${videoId}`, {
             headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 'Referer': 'https://videa.hu/'
             },
-            timeout: 10000
+            timeout: 15000
         });
 
         const html = response.data;
-        
-        // Megkeressük a JavaScript változót, amiben a videó forrásai vannak
-        // Ez a regex kiszedi a "_v_s_sources" vagy hasonló JSON listákat
-        const sourceRegex = /source[:\s]+["'](https:\/\/[^"']+\.mp4[^"']*)["']/i;
-        const match = html.match(sourceRegex);
+        let directUrl = null;
 
-        if (match && match[1]) {
-            let directUrl = match[1].replace(/&amp;/g, '&');
+        // 1. Módszer: Keresés a forrás listában (JSON formátum)
+        const sourceMatch = html.match(/["']?source["']?\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
+        if (sourceMatch) directUrl = sourceMatch[1];
+
+        // 2. Módszer: Ha az első nem sikerült, keressük a '_v_s_sources' listát
+        if (!directUrl) {
+            const multiMatch = html.match(/src\s*:\s*["'](https?:\/\/[^"']+\.mp4[^"']*)["']/gi);
+            if (multiMatch) {
+                // Kivesszük az utolsót (általában ez a legjobb minőség)
+                const lastSrc = multiMatch[multiMatch.length - 1];
+                const cleanMatch = lastSrc.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)["']/i);
+                if (cleanMatch) directUrl = cleanMatch[1];
+            }
+        }
+
+        if (directUrl) {
+            // Karakterkódolások tisztítása
+            directUrl = directUrl.replace(/&amp;/g, '&').replace(/\\/g, '');
             
-            // Ha relatív URL lenne (ritka), kiegészítjük
-            if (directUrl.startsWith('//')) directUrl = 'https:' + directUrl;
-
             cache[videoId] = { url: directUrl, timestamp: Date.now() };
-            console.log(`Sikeres kinyerés (HTML): ${videoId}`);
+            console.log(`Siker! Link kinyerve: ${videoId}`);
             return res.json({ url: directUrl });
         } else {
-            // Második próbálkozás: b64 kódolt források keresése
-            const b64Regex = /sources[:\s]+["']([^"']+)["']/i;
-            const b64Match = html.match(b64Regex);
-            
-            console.error("Nem sikerült a kinyerés a HTML-ből.");
-            return res.status(404).json({ error: 'A videó forrása rejtett vagy nem elérhető.' });
+            console.error("Nem sikerült kinyerni a forrást a HTML-ből.");
+            return res.status(404).json({ error: 'A videó forrása jelenleg nem elérhető.' });
         }
     } catch (error) {
-        console.error('Szerver hiba:', error.message);
-        res.status(500).json({ error: 'A Videa elutasította a kapcsolatot.' });
+        console.error('Lekérési hiba:', error.message);
+        res.status(500).json({ error: 'A hálózati kapcsolat megszakadt.' });
     }
 });
 
-app.get('/', (req, res) => res.send('Backend üzemkész!'));
-
-app.listen(port, () => console.log(`Szerver elindult: ${port}`));
+app.get('/', (req, res) => res.send('API Aktív'));
+app.listen(port, () => console.log(`Szerver kész: ${port}`));
